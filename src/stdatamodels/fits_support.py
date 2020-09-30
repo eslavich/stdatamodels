@@ -318,17 +318,6 @@ FITS_VALIDATORS.update({
 })
 
 
-META_SCHEMA_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), 'metaschema'))
-
-
-FITS_SCHEMA_URL_MAPPING = resolver.Resolver(
-    [
-        ('http://stsci.edu/schemas/fits-schema/',
-         'file://' + META_SCHEMA_PATH + '/{url_suffix}.yaml')
-    ] + resolver.DEFAULT_URL_MAPPING, 'url')
-
-
 def _save_from_schema(hdulist, tree, schema):
     def convert_datetimes(node, json_id):
         if isinstance(node, datetime.datetime):
@@ -344,7 +333,7 @@ def _save_from_schema(hdulist, tree, schema):
         kwargs = {}
 
     validator = asdf_schema.get_validator(
-        schema, None, FITS_VALIDATORS, FITS_SCHEMA_URL_MAPPING, **kwargs)
+        schema, None, FITS_VALIDATORS, **kwargs)
 
     validator.hdulist = hdulist
     # TODO: Handle comment stack on per-hdu-basis
