@@ -20,19 +20,18 @@ from asdf import AsdfFile
 from asdf import yamlutil
 from asdf import schema as asdf_schema
 
-from . import ndmodel
 from . import filetype
 from . import fits_support
 from . import properties
 from . import schema as mschema
 from . import validate
 from .util import get_envar_as_boolean
-from ..lib import s3_utils
+from . import s3_utils
 
 from .history import HistoryList
 
 
-class DataModel(properties.ObjectNode, ndmodel.NDModel):
+class DataModel(properties.ObjectNode):
     """
     Base class of all of the data models.
     """
@@ -524,7 +523,7 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
 
         Returns
         -------
-        model : `~jwst.datamodels.DataModel` instance
+        model : `~stdatamodels.DataModel` instance
             A data model.
         """
         return cls(init, schema=schema, **kwargs)
@@ -568,7 +567,7 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
 
         Returns
         -------
-        model : `~jwst.datamodels.DataModel`
+        model : `~stdatamodels.DataModel`
             A data model.
         """
         return cls(init, schema=schema, **kwargs)
@@ -611,8 +610,6 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
     def __setattr__(self, attr, value):
         if self.my_attribute(attr):
             object.__setattr__(self, attr, value)
-        elif ndmodel.NDModel.my_attribute(self, attr):
-            ndmodel.NDModel.__setattr__(self, attr, value)
         else:
             properties.ObjectNode.__setattr__(self, attr, value)
 
@@ -812,7 +809,7 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
 
         Parameters
         ----------
-        d : `~jwst.datamodels.DataModel` or dictionary-like object
+        d : `~stdatamodels.DataModel` or dictionary-like object
             The model to copy the metadata elements from. Can also be a
             dictionary or dictionary of dictionaries or lists.
         only: str, None
@@ -982,7 +979,7 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
         values : list
             For FITS files this should be a list of strings.
             For ASDF files use a list of ``HistoryEntry`` object. It can be created
-            with `~jwst.datamodels.util.create_history_entry`.
+            with `~stdatamodels.util.create_history_entry`.
 
         """
         entries = self.history
