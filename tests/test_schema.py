@@ -15,17 +15,13 @@ from astropy.io import fits
 from astropy.modeling import models
 from astropy import time
 
-from .. import util, validate
-from .. import _defined_models as defined_models
-from .. import (DataModel, ImageModel, RampModel, MaskModel, MultiSlitModel,
-    AsnModel, CollimatorModel, SourceModelContainer, MultiExposureModel,
-    DrizProductModel, MultiProductModel, MIRIRampModel)
-from ..schema import merge_property_trees, build_docstring
-
-from ..extension import URL_PREFIX
-
 import asdf
 from asdf import schema as mschema
+
+from stdatamodels import util, validate, DataModel
+
+from stadatamodels.schema import merge_property_trees, build_docstring
+
 
 FITS_FILE = None
 MASK_FILE = None

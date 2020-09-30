@@ -9,8 +9,7 @@ from numpy.testing import assert_array_equal
 
 from asdf import schema as mschema
 
-from .. import DataModel, ImageModel, RampModel
-from ..util import open
+from stdatamodels import DataModel
 
 ROOT_DIR = None
 FITS_FILE = None

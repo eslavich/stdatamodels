@@ -35,6 +35,7 @@ class DataModel(properties.ObjectNode):
     """
     Base class of all of the data models.
     """
+
     def __init__(self, init=None, schema=None, memmap=False,
                  pass_invalid_values=None, strict_validation=None,
                  ignore_missing_extensions=True, **kwargs):
@@ -233,26 +234,13 @@ class DataModel(properties.ObjectNode):
             getattr(self, primary_array_name)
 
         # if the input is from a file, set the filename attribute
+        self._filename = None
         if isinstance(init, str):
-            self.meta.filename = os.path.basename(init)
+            self._filename = os.path.basename(init)
         elif isinstance(init, fits.HDUList):
             info = init.fileinfo(0)
             if info is not None:
-                filename = info.get('filename')
-                if filename is not None:
-                    self.meta.filename = os.path.basename(filename)
-
-        # if the input model doesn't have a date set, use the current date/time
-        if not self.meta.hasattr('date'):
-            current_date = Time(datetime.datetime.now())
-            current_date.format = 'isot'
-            self.meta.date = current_date.value
-
-        # store the data model type, if not already set
-        klass = self.__class__.__name__
-        if klass != 'DataModel':
-            if not self.meta.hasattr('model_type'):
-                self.meta.model_type = klass
+                self._filename = info.get('filename')
 
         # initialize arrays from keyword arguments when they are present
 
@@ -276,21 +264,25 @@ class DataModel(properties.ObjectNode):
         return None
 
     @property
-    def _model_type(self):
-        return self.__class__.__name__
+    def filename(self):
+        """
+        The filename, if this model was initialized with
+        a file.
+
+        Returns
+        -------
+        str or None
+        """
+        return self._filename
 
     def __repr__(self):
         buf = ['<']
-        buf.append(self._model_type)
+        buf.append(self.__class__.__name__)
 
         if self.shape:
             buf.append(str(self.shape))
 
-        try:
-            filename = self.meta.filename
-        except AttributeError:
-            filename = None
-        if filename:
+        if self.filename:
             buf.append(" from ")
             buf.append(filename)
         buf.append('>')
@@ -442,14 +434,7 @@ class DataModel(properties.ObjectNode):
             The path to the file that we're about to save to.
         """
         if isinstance(path, str):
-            self.meta.filename = os.path.basename(path)
-
-        current_date = Time(datetime.datetime.now())
-        current_date.format = 'isot'
-        self.meta.date = current_date.value
-
-        # Enforce model_type to be the actual type of model being saved.
-        self.meta.model_type = self._model_type
+            self._filename = os.path.basename(path)
 
     def save(self, path, dir_path=None, *args, **kwargs):
         """
@@ -460,7 +445,7 @@ class DataModel(properties.ObjectNode):
         path : string or func
             File path to save to.
             If function, it takes one argument with is
-            model.meta.filename and returns the full path string.
+            model.filename and returns the full path string.
 
         dir_path: string
             Directory to save to. If not None, this will override
@@ -472,7 +457,7 @@ class DataModel(properties.ObjectNode):
             The file path the model was saved in.
         """
         if callable(path):
-            path_head, path_tail = os.path.split(path(self.meta.filename))
+            path_head, path_tail = os.path.split(path(self.filename))
         else:
             path_head, path_tail = os.path.split(path)
         base, ext = os.path.splitext(path_tail)
@@ -677,12 +662,6 @@ class DataModel(properties.ObjectNode):
             If `return_result` is `True`, a list of the locations in
             the schema where this FITS keyword is used.  Each element
             is a dot-separated path.
-
-        Example
-        -------
-        >>> model = DataModel()
-        >>> model.find_fits_keyword('DATE-OBS')
-        ['meta.observation.date']
         """
         from . import schema
         return schema.find_fits_keyword(self.schema, keyword)
