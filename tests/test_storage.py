@@ -1,6 +1,6 @@
 import numpy as np
 
-from stadatamodels import util
+from stdatamodels import util
 
 
 def test_gentle_asarray():

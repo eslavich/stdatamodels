@@ -43,6 +43,7 @@ def test_historylist_methods():
     h1.clear()
     assert len(h1) == 0, "Clear history list"
 
+
 def test_history_from_model_to_fits(tmpdir):
     tmpfits = str(tmpdir.join('tmp.fits'))
     m = DataModel()

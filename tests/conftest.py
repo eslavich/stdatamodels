@@ -2,7 +2,7 @@ import pytest
 
 from stdatamodels import s3_utils
 
-from . import helpers
+import helpers
 
 
 @pytest.fixture(autouse=True)
