@@ -207,6 +207,18 @@ def test_validate():
         model.validate()
 
 
+def test_validate_enum_constraint():
+    model = ValidationModel()
+
+    with pytest.warns(None) as warnings:
+        model.meta.enum_attribute = "foo"
+    assert model.meta.enum_attribute == "foo"
+
+    with pytest.warns(ValidationWarning):
+        model.meta.enum_attribute = "nope"
+    assert model.meta.enum_attribute == "foo"
+
+
 def test_validate_fits_required_fields():
     model = FitsRequiredModel()
 

@@ -13,6 +13,9 @@ allOf:
             type: string
           integer_attribute:
             type: integer
+          enum_attribute:
+            type: string
+            enum: [foo, bar, baz]
           object_attribute:
             type: object
             properties:
