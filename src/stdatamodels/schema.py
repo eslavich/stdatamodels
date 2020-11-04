@@ -1,11 +1,8 @@
-# Licensed under a 3-clause BSD style license - see LICENSE.rst
-
 import re
 from collections import OrderedDict
 
 
-# return_result included for backward compatibility
-def find_fits_keyword(schema, keyword, return_result=False):
+def find_fits_keyword(schema, keyword):
     """
     Utility function to find a reference to a FITS keyword in a given
     schema.  This is intended for interactive use, and not for use
@@ -23,74 +20,12 @@ def find_fits_keyword(schema, keyword, return_result=False):
     -------
     locations : list of str
     """
-    def find_fits_keyword(subschema, path, combiner, ctx, recurse):
-        if len(path) and path[0] == 'extra_fits':
-            return True
+    results = []
+    def _callback(subschema, path):
         if subschema.get('fits_keyword') == keyword:
             results.append('.'.join(path))
 
-    results = []
-    walk_schema(schema, find_fits_keyword, results)
-
-    return results
-
-def build_fits_dict(schema):
-    """
-    Utility function to create a dict that maps FITS keywords to their
-    metadata attribute in a input schema.
-
-    Parameters
-    ----------
-    schema : JSON schema fragment
-        The schema in which to search.
-
-    Returns
-    -------
-    results : dict
-        Dictionary with FITS keywords as keys and schema metadata
-        attributes as values
-
-    """
-    def build_fits_dict(subschema, path, combiner, ctx, recurse):
-        if len(path) and path[0] == 'extra_fits':
-            return True
-        kw = subschema.get('fits_keyword')
-        if kw is not None:
-            results[kw] = '.'.join(path)
-
-    results = {}
-    walk_schema(schema, build_fits_dict, results)
-
-    return results
-
-
-def build_schema2fits_dict(schema):
-    """
-    Utility function to create a dict that maps metadata attributes to thier
-    FITS keyword and FITS HDU locations (if any).
-
-    Parameters
-    ----------
-    schema : JSON schema fragment
-        The schema in which to search.
-
-    Returns
-    -------
-    results : dict
-        Dictionary with schema metadata path as keys and a tuple of FITS
-        keyword and FITS HDU as values.
-
-    """
-    def build_schema_dict(subschema, path, combiner, ctx, recurse):
-        if len(path) and path[0] == 'extra_fits':
-            return True
-        kw = subschema.get('fits_keyword')
-        hdu = subschema.get('fits_hdu')
-        if kw is not None:
-            results['.'.join(path)] = (kw, hdu)
-
-    results = {}
-    walk_schema(schema, build_schema_dict, results)
+    walk_schema(schema, _callback)
 
     return results
 
@@ -136,7 +71,7 @@ def search_schema(schema, substring):
     def find_substring(subschema, path, combiner, ctx, recurse):
         matches = False
         for param in ('title', 'description'):
-            if substring in schema.get(param, '').lower():
+            if substring in subschema.get(param, '').lower():
                 matches = True
                 break
 
@@ -145,8 +80,8 @@ def search_schema(schema, substring):
 
         if matches:
             description = '\n\n'.join([
-                schema.get('title', ''),
-                schema.get('description', '')]).strip()
+                subschema.get('title', ''),
+                subschema.get('description', '')]).strip()
             results.append(('.'.join(path), description))
 
     results = SearchSchemaResults()
@@ -155,58 +90,69 @@ def search_schema(schema, substring):
     return results
 
 
-def walk_schema(schema, callback, ctx=None):
+def walk_schema(schema, callback):
     """
-    Walks a JSON schema tree in breadth-first order, calling a
+    Walks a schema tree in breadth-first order, calling a
     callback function at each entry.
 
     Parameters
     ----------
-    schema : JSON schema
+    schema : dict
 
     callback : callable
         The callback receives the following arguments at each entry:
 
         - subschema: The subschema for the entry
-        - path: A list of strings defining the path to the entry
-        - combiner: The current combiner in effect, will be 'allOf',
-          'anyOf', 'oneOf', 'not' or None
-        - ctx: An arbitrary context object, usually a dictionary
-        - recurse: A function to call to recurse deeper on a node.
-
-        If the callback returns `True`, the subschema will not be
-        further recursed.
-
-    ctx : object, optional
-        An arbitrary context object
+        - path: A list of strings or integer indices defining the path to the entry
     """
-    def recurse(schema, path, combiner, ctx):
-        if callback(schema, path, combiner, ctx, recurse):
+    def recurse(schema, path):
+        if callback(schema, path):
             return
 
-        for c in ['allOf', 'not']:
-            for sub in schema.get(c, []):
-                recurse(sub, path, c, ctx)
+        if 'not' in schema:
+            recurse(schema['not'], path + ['not'])
 
-        for c in ['anyOf', 'oneOf']:
-            for i, sub in enumerate(schema.get(c, [])):
-                recurse(sub, path + [c], c, ctx)
+        for combiner in ['allOf', 'anyOf', 'oneOf']:
+            for i, sub in enumerate(schema.get(combiner, [])):
+                recurse(sub, path + [combiner, i])
 
         if schema.get('type') == 'object':
             for key, val in schema.get('properties', {}).items():
-                recurse(val, path + [key], combiner, ctx)
-
-        if schema.get('type') == 'array':
+                recurse(val, path + ['properties', key])
+        elif schema.get('type') == 'array':
             items = schema.get('items', {})
             if isinstance(items, list):
                 for i, item in enumerate(items):
-                    recurse(item, path + [i], combiner, ctx)
-            elif len(items):
-                recurse(items, path + ['items'], combiner, ctx)
+                    recurse(item, path + ['items', i])
+            elif len(items) > 0:
+                recurse(items, path + ['items'])
 
-    if ctx is None:
-        ctx = {}
-    recurse(schema, [], None, ctx)
+    recurse(schema, [])
+
+
+def schema_path_to_model_path(path):
+    """
+    Convert a list of schema path segments to the corresponding
+    DataModel attribute path string.
+
+    Parameters
+    ----------
+    path : list
+        Path to an object property in a schema.
+
+    Returns
+    -------
+    str
+        DataModel attribute path, or None if the attribute
+        is expected to not exist due to ``not`` combiners.
+    """
+    result = []
+    for i, part in enumerate(path):
+        if part == "not":
+            return None
+        elif part == "items":
+            if len(path) > i + 1:
+                
 
 
 def merge_property_trees(schema):
