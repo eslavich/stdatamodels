@@ -21,7 +21,6 @@ from asdf import AsdfFile
 from asdf.fits_embed import AsdfInFits
 from asdf import schema as asdf_schema
 
-from . import ndmodel
 from . import filetype
 from . import fits_support
 from . import properties
@@ -52,7 +51,7 @@ _DEFAULT_SCHEMA = {
 }
 
 
-class DataModel(properties.ObjectNode, ndmodel.NDModel):
+class DataModel(properties.ObjectNode):
     """
     Base class of all of the data models.
     """
@@ -167,6 +166,7 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
 
         # Provide the object as context to other classes and functions
         self._ctx = self
+        self._name = None
 
         # Initialize with an empty AsdfFile instance as this is needed for
         # reading in FITS files where validate._check_value() gets called, and
@@ -646,15 +646,9 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
                 self._shape = primary_array.shape
         return self._shape
 
-    def my_attribute(self, attr):
-        properties = frozenset(("shape", "history", "_extra_fits", "schema"))
-        return attr in properties
-
     def __setattr__(self, attr, value):
-        if self.my_attribute(attr):
+        if attr in {"shape", "history", "_extra_fits", "schema"}:
             object.__setattr__(self, attr, value)
-        elif ndmodel.NDModel.my_attribute(self, attr):
-            ndmodel.NDModel.__setattr__(self, attr, value)
         else:
             properties.ObjectNode.__setattr__(self, attr, value)
 
@@ -734,89 +728,6 @@ class DataModel(properties.ObjectNode, ndmodel.NDModel):
         """
         from . import schema
         return schema.search_schema(self.schema, substring)
-
-    def __getitem__(self, key):
-        """
-        Get a metadata value using a dotted name.
-        """
-        assert isinstance(key, str)
-        meta = self
-        for part in key.split('.'):
-            try:
-                meta = getattr(meta, part)
-            except AttributeError:
-                raise KeyError(repr(key))
-        return meta
-
-    def __setitem__(self, key, value):
-        """
-        Set a metadata value using a dotted name.
-        """
-        assert isinstance(key, str)
-        meta = self
-        parts = key.split('.')
-        for part in parts[:-1]:
-            try:
-                part = int(part)
-            except ValueError:
-                try:
-                    meta = getattr(meta, part)
-                except AttributeError:
-                    raise KeyError(repr(key))
-            else:
-                meta = meta[part]
-
-        part = parts[-1]
-        try:
-            part = int(part)
-        except ValueError:
-            setattr(meta, part, value)
-        else:
-            meta[part] = value
-
-    def items(self):
-        """
-        Iterates over all of the schema items in a flat way.
-
-        Each element is a pair (`key`, `value`).  Each `key` is a
-        dot-separated name.  For example, the schema element
-        `meta.observation.date` will end up in the result as::
-
-            ("meta.observation.date": "2012-04-22T03:22:05.432")
-        """
-        def recurse(tree, path=[]):
-            if isinstance(tree, dict):
-                for key, val in tree.items():
-                    for x in recurse(val, path + [key]):
-                        yield x
-            elif isinstance(tree, (list, tuple)):
-                for i, val in enumerate(tree):
-                    for x in recurse(val, path + [i]):
-                        yield x
-            elif tree is not None:
-                yield ('.'.join(str(x) for x in path), tree)
-
-        for x in recurse(self._instance):
-            yield x
-
-    def keys(self):
-        """
-        Iterates over all of the schema keys in a flat way.
-
-        Each result of the iterator is a `key`.  Each `key` is a
-        dot-separated name.  For example, the schema element
-        `meta.observation.date` will end up in the result as the
-        string `"meta.observation.date"`.
-        """
-        for key, val in self.items():
-            yield key
-
-    def values(self):
-        """
-        Iterates over all of the schema values in a flat way.
-        """
-        for key, val in self.items():
-            yield val
 
     def update(self, d, only=None, extra_fits=False):
         """

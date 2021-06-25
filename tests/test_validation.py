@@ -94,9 +94,8 @@ def test_object_assignment_with_nested_null():
     assert len(warnings) == 0
 
 
-@pytest.mark.xfail(reason="validation of a required attribute not yet implemented", strict=True)
 def test_required_attribute_assignment():
-    model = RequiredModel()
+    model = RequiredModel({"meta": {"required_attribute": "bar"}})
 
     with pytest.warns(None) as warnings:
         model.meta.required_attribute = "foo"
@@ -106,27 +105,26 @@ def test_required_attribute_assignment():
         model.meta.required_attribute = None
 
 
-@pytest.mark.xfail(reason="validation of required attributes not yet implemented", strict=True)
 def test_validation_on_delete():
-    model = RequiredModel()
+    model = RequiredModel({"meta": {"required_attribute": "bar"}})
 
     with pytest.warns(None) as warnings:
-        model.meta.required_keyword = "foo"
+        model.meta.required_attribute = "foo"
     assert len(warnings) == 0
 
     with pytest.warns(ValidationWarning):
-        del model.meta.required_keyword
-    assert model.meta.required_keyword == "foo"
+        del model.meta.required_attribute
+    assert model.meta.required_attribute == "foo"
 
-    model = RequiredModel(pass_invalid_values=True)
+    model = RequiredModel({"meta": {"required_attribute": "bar"}}, pass_invalid_values=True)
 
     with pytest.warns(None) as warnings:
-        model.meta.required_keyword = "foo"
+        model.meta.required_attribute = "foo"
     assert len(warnings) == 0
 
     with pytest.warns(ValidationWarning):
-        del model.meta.required_keyword
-    assert model.meta.required_keyword is None
+        del model.meta.required_attribute
+    assert model.meta.required_attribute is None
 
 
 @pytest.mark.parametrize(
