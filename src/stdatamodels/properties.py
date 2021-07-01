@@ -206,11 +206,11 @@ def _make_default(attr, schema, ctx):
             return None
 
 
-def _make_node(attr, instance, schema, ctx):
+def _make_node(parent, key, instance, schema):
     if isinstance(instance, dict):
-        return ObjectNode(attr, instance, schema, ctx)
+        return ObjectNode(parent._path + [key], instance, schema, parent._ctx)
     elif isinstance(instance, list):
-        return ListNode(attr, instance, schema, ctx)
+        return ListNode(parent._path + [key], instance, schema, parent._ctx)
     else:
         return instance
 
@@ -254,21 +254,18 @@ def _find_property(schema, attr):
 
 
 class Node():
-    def __init__(self, attr, instance, schema, ctx):
-        self._name = attr
+    def __init__(self, path, instance, schema, ctx):
+        self._path = path
         self._instance = instance
         self._schema = schema
         self._ctx = ctx
 
     def _validate(self):
-        return validate.value_change(self._name, self._instance, self._schema, self._ctx)
+        return validate.value_change(self._path, self._instance, self._schema, self._ctx)
 
     @property
     def instance(self):
         return self._instance
-
-
-_NotSet = object()
 
 
 class ObjectNode(Node, MutableMapping):
@@ -283,15 +280,17 @@ class ObjectNode(Node, MutableMapping):
             return self._instance == other
 
     def __getattr__(self, attr):
+        # TODO: Figure out if this is necessary
         if attr.startswith('_'):
             raise AttributeError(f"No attribute '{attr}'")
 
         try:
             return self.__getitem__(attr)
         except KeyError:
-            raise AttributeError(f"Attribute '{attr}' missing")
+            raise AttributeError(f"Attribute '{attr}' has not been assigned and has no default in the schema")
 
     def __setattr__(self, attr, val):
+        # TODO: Figure out if this is necessary
         if attr.startswith('_'):
             self.__dict__[attr] = val
         else:
@@ -310,16 +309,13 @@ class ObjectNode(Node, MutableMapping):
                 raise AttributeError(f"Attribute '{attr}' missing")
 
     def __iter__(self):
-        return NodeIterator(self)
+        return NodeIterator(self._instance)
 
     def __len__(self):
-        return sum(1 for _ in NodeIterator(self))
-
-    def hasattr(self, attr):
-        return attr in self._instance
+        return sum(1 for _ in NodeIterator(self._instance))
 
     def __getitem__(self, key):
-        parts = key.split(".", 1)
+        parts = key.split('.', 1)
 
         schema = _get_schema_for_property(self._schema, parts[0])
         try:
@@ -331,7 +327,7 @@ class ObjectNode(Node, MutableMapping):
             if value is not None:
                 self._instance[parts[0]] = value
 
-        node = _make_node(parts[0], value, schema, self._ctx)
+        node = _make_node(self, parts[0], value, schema)
 
         if len(parts) > 1:
             return node.__getitem__(parts[-1])
@@ -339,51 +335,97 @@ class ObjectNode(Node, MutableMapping):
             return node
 
     def __setitem__(self, key, value):
-        parts = key.split(".", 1)
+        parts = key.split('.', 1)
 
         if len(parts) > 1:
             self.__getitem__(parts[0]).__setitem__(parts[-1], value)
         else:
             schema = _get_schema_for_property(self._schema, key)
             if value is None:
+                # Setting None is interpreted as a request to restore
+                # the default value.
                 value = _make_default(key, schema, self._ctx)
             value = _cast(value, schema)
 
             if self._ctx._validate_on_assignment:
-                original_value = self._instance.get(key, _NotSet)
-                self._instance[key] = value
-                try:
-                    if not self._validate():
-                        if original_value is not _NotSet:
-                            self._instance[key] = original_value
-                        else:
-                            del self._instance[key]
-                except ValidationError as e:
-                    if original_value is not _NotSet:
-                        self._instance[key] = original_value
-                    else:
-                        del self._instance[key]
-                    raise e
+                if validate.value_change(self._path + [key], value, schema, self._ctx):
+                    self._instance[key] = value
             else:
                 self._instance[key] = value
 
     def __delitem__(self, key):
-        parts = key.split(".", 1)
+        parts = key.split('.', 1)
 
         if len(parts) > 1:
             self.__getitem__(parts[0]).__delitem__(parts[-1])
-        elif self._ctx._validate_on_assignment:
-            original_value = self._instance.get(key, _NotSet)
-            del self._instance[key]
-            try:
-                if not self._validate() and original_value is not _NotSet:
-                    self._instance[key] = original_value
-            except ValidationError as e:
-                if original_value is not _NotSet:
-                    self._instance[key] = original_value
-                raise e
         else:
-            del self._instance[key]
+            if self._ctx._validate_on_assignment:
+                # Deleting an item might run us afoul of a required
+                # validator, so we need to validate the whole instance.
+                test_instance = self._instance.copy()
+                del test_instance[key]
+                if validate.value_change(self._path, test_instance, self._schema, self._ctx):
+                    del self._instance[key]
+            else:
+                del self._instance[key]
+
+
+def _slice_to_str(slice):
+    """
+    Convert a slice object to its string representation
+    for use in a DataModel key.
+    """
+    parts = []
+    if slice.start is not None:
+        parts.append(str(slice.start))
+    parts.append(':')
+
+    if slice.stop is not None:
+        parts.append(str(slice.stop))
+
+    if slice.step is not None:
+        parts.append(':')
+        parts.append(str(slice.step))
+
+    return ''.join(parts)
+
+
+def _str_to_slice(string):
+    """
+    Convert a string representation of a slice to a
+    slice object.
+    """
+    parts = string.split(':')
+    if parts[0] != '':
+        start = int(parts[0])
+    else:
+        start = None
+
+    if parts[1] != '':
+        end = int(parts[1])
+    else:
+        end = None
+
+    if len(parts) > 2 and parts[2] != '':
+        step = int(parts[2])
+    else:
+        step = None
+
+    return slice(start, end, step)
+
+
+def _handle_key(key):
+    """
+    Split the current level off of a multi-level key.
+    """
+    if isinstance(key, (int, slice)):
+        return key, None
+        else:
+            parts = key.split('.', 1)
+            if ':' in parts[0]:
+                index = _str_to_slice(parts[0])
+            else:
+                index = int(parts[0])
 
 
 class ListNode(Node, MutableSequence):
@@ -401,9 +443,6 @@ class ListNode(Node, MutableSequence):
     def __ne__(self, other):
         return self._instance != self.__cast(other)
 
-    def __contains__(self, item):
-        return item in self._instance
-
     def __len__(self):
         return len(self._instance)
 
@@ -412,130 +451,140 @@ class ListNode(Node, MutableSequence):
             parts = [key]
             index = key
         else:
-            parts = key.split(".", 1)
-            index = int(parts[0])
+            parts = key.split('.', 1)
+            if ':' in parts[0]:
+                index = _str_to_slice(parts[0])
+            else:
+                index = int(parts[0])
 
-        schema = _get_schema_for_index(self._schema, index)
-        node = _make_node(self._name, self._instance[index], schema, self._ctx)
         if len(parts) > 1:
+            schema = _get_schema_for_index(self._schema, index)
+            node = _make_node(self, index, self._instance[index], schema)
             return node.__getitem__(parts[-1])
+        elif isinstance(index, int):
+            schema = _get_schema_for_index(self._schema, index)
+            return _make_node(self, index, self._instance[index], schema)
         else:
-            return node
+            indices = list(range(*index.indices(len(self._instance))))
+
+            if isinstance(self._schema['items'], list):
+                schema_items = [_get_schema_for_index(self._schema, i) for i in indices]
+            else:
+                schema_items = self._schema['items']
+
+            schema = {'type': 'array', 'items': schema_items}
+
+            return _make_node(self, _slice_to_str(index), self._instance[index], schema, self._ctx)
 
     def __setitem__(self, key, value):
-        if isinstance(key, int):
+        if isinstance(key, (int, slice)):
             parts = [key]
             index = key
-        elif isinstance(key, slice):
-            raise TypeError("ListNode does not support assignment to a slice")
         else:
-            parts = key.split(".", 1)
-            index = int(parts[0])
+            parts = key.split('.', 1)
+            if ':' in parts[0]:
+                index = _str_to_slice(parts[0])
+            else:
+                index = int(parts[0])
 
         if len(parts) > 1:
             self.__getitem__(index).__setitem__(parts[-1], value)
-        else:
+        elif isinstance(index, int):
             schema = _get_schema_for_index(self._schema, index)
             value = _cast(value, schema)
 
             if self._ctx._validate_on_assignment:
-                original_value = self._instance[index]
+                if validate.value_change(self._path + [index], value, schema, self._ctx):
+                    self._instance[index] = value
+            else:
                 self._instance[index] = value
-                try:
-                    if not self._validate():
-                        self._instance[index] = original_value
-                except ValidationError as e:
-                    self._instance[index] = original_value
-                    raise e
+        else:
+            if self._ctx._validate_on_assignment:
+                indices = list(range(*index.indices(len(self._instance))))
+                schemas = [_get_schema_for_index(self._schema, i) for i in indices]
+                values = [_cast(value, s) for s in schemas]
+                if all(validate.value_change(self._path + [i], v, s, self._ctx) for i, v, s in zip(indices, values, schemas)):
+                    self._instance[index] = value
             else:
                 self._instance[index] = value
 
     def __delitem__(self, key):
-        if isinstance(key, int):
+        if isinstance(key, (int, slice)):
             parts = [key]
             index = key
-        elif isinstance(key, slice):
-            raise TypeError("ListNode does not support deletion of a slice")
         else:
-            parts = key.split(".", 1)
-            index = int(parts[0])
+            parts = key.split('.', 1)
+            if ':' in parts[0]:
+                index = _str_to_slice(parts[0])
+            else:
+                index = int(parts[0])
 
         if len(parts) > 1:
             self.__getitem__(index).__delitem__(parts[-1])
-        elif self._ctx._validate_on_assignment:
-            original_value = self._instance[index]
-            del self._instance[index]
-            try:
-                if not self._validate():
-                    self._instance.insert(index, original_value)
-            except ValidationError as e:
-                self._instance.insert(index, original_value)
-                raise e
         else:
-            del self._instance[index]
-
-    def append(self, item):
-        schema = _get_schema_for_index(self._schema, len(self._instance))
-        item = _cast(item, schema)
-        node = ObjectNode(self._name, item, schema, self._ctx)
-        if self._ctx._validate_on_assignment:
-            if node._validate():
-                self._instance.append(item)
-        else:
-            self._instance.append(item)
+            if self._ctx._validate_on_assignment:
+                # Deleting an item changes the indexes of the remainder of the
+                # list, so we need to validate the whole instance.
+                test_instance = self._instance.copy()
+                del test_instance[index]
+                if validate.value_change(self._path, test_instance, self._schema, self._ctx):
+                    del self._instance[index]
+            else:
+                del self._instance[index]
 
     def insert(self, i, item):
         schema = _get_schema_for_index(self._schema, i)
         item = _cast(item, schema)
-        node = ObjectNode(self._name, item, schema, self._ctx)
+
         if self._ctx._validate_on_assignment:
-            if node._validate():
+            # Inserting an item shifts all subsequent items to new indexes,
+            # so we need to validate the entire instance.
+            test_instance = self._instance.copy()
+            test_instance.insert(i, item)
+            if validate.value_change(self._path, test_instance, self._schema, self._ctx):
                 self._instance.insert(i, item)
         else:
             self._instance.insert(i, item)
 
-    def pop(self, i=-1):
-        schema = _get_schema_for_index(self._schema, 0)
-        x = self._instance.pop(i)
-        return _make_node(self._name, x, schema, self._ctx)
-
-    def remove(self, item):
-        self._instance.remove(item)
-
-    def count(self, item):
-        return self._instance.count(item)
-
-    def index(self, item):
-        return self._instance.index(item)
-
-    def reverse(self):
-        self._instance.reverse()
-
     def sort(self, *args, **kwargs):
-        self._instance.sort(*args, **kwargs)
-
-    def extend(self, other):
-        for part in _unmake_node(other):
-            self.append(part)
+        if self._ctx._validate_on_assignment:
+            test_instance = self._instance.copy()
+            test_instance.sort(*args, **kwargs)
+            if validate.value_change(self._path, test_instance, self._schema, self._ctx):
+                self._instance.sort(*args, **kwargs)
+        else:
+            self._instance.sort(*args, **kwargs)
 
     def item(self, **kwargs):
-        assert isinstance(self._schema['items'], dict)
-        node = ObjectNode(self._name, kwargs, self._schema['items'],
-                          self._ctx)
-        if not self._ctx._validate_on_assignment:
-            return node
-        if not node._validate():
-            node = None
-        return node
+        """
+        Create an element for this array. Schema must use "list validation" for array
+        items and item type must be object.
+
+        Parameters
+        ----------
+        **kwargs
+            Initial values for the new object.
+
+        Returns
+        -------
+        ObjectNode
+        """
+        if not isinstance(self._schema.get('items'), dict):
+            raise TypeError('Schema for this array uses tuple validation')
+
+        if not self._schema['items'].get('type') == 'object':
+            raise TypeError('Schema for this array specifies non-object elements')
+
+        return _make_node(self, 0, kwargs, self._schema['items'])
 
 
 class NodeIterator:
     """
-    An iterator for a node which flattens the hierachical structure
+    An iterator over node keys which flattens the hierachical structure.
     """
     def __init__(self, node):
         self.key_stack = []
-        self.iter_stack = [iter(node._instance.items())]
+        self.iter_stack = [self._get_iter(node)]
 
     def __iter__(self):
         return self
@@ -550,13 +599,21 @@ class NodeIterator:
                     self.key_stack.pop()
                 continue
 
-            if isinstance(val, dict):
+            if isinstance(val, (dict, list)):
                 self.key_stack.append(key)
-                self.iter_stack.append(iter(val.items()))
+                self._get_iter(val)
             else:
-                return '.'.join(self.key_stack + [key])
+                return '.'.join(self.key_stack + [str(key)])
 
         raise StopIteration
+
+    def _get_iter(self, val):
+        if isinstance(val, dict):
+            return ((str(k), v) for k, v in val.items())
+        elif isinstance(val, list):
+            return ((str(i), v) for i, v in enumerate(val))
+        else:
+            raise TypeError("Can't make iterator")
 
 
 def put_value(path, value, tree):
