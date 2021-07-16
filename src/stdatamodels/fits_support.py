@@ -458,7 +458,12 @@ def _fits_array_loader(hdulist, schema, hdu_index, known_datas):
         return None
 
     known_datas.add(hdu)
-    return from_fits_hdu(hdu, schema)
+
+    # Correct the pseudo-unsigned int problem:
+    if isinstance(hdu.data, fits.FITS_rec):
+        hdu.data.dtype = util.rebuild_fits_rec_dtype(hdu.data)
+
+    return hdu.data
 
 
 def _schema_has_fits_hdu(schema):
@@ -631,28 +636,6 @@ def from_fits_asdf(hdulist,
                                       ignore_version_mismatch=ignore_version_mismatch,
                                       ignore_unrecognized_tag=ignore_unrecognized_tag,
                                       ignore_missing_extensions=ignore_missing_extensions)
-
-
-def from_fits_hdu(hdu, schema):
-    """
-    Read the data from a fits hdu into a numpy ndarray
-    """
-    data = hdu.data
-
-    # Save the column listeners for possible restoration
-    if hasattr(data, '_coldefs'):
-        listeners = data._coldefs._listeners
-    else:
-        listeners = None
-
-    # Cast array to type mentioned in schema
-    data = properties._cast(data, schema)
-
-    # Casting a table loses the column listeners, so restore them
-    if listeners is not None:
-        data._coldefs._listeners = listeners
-
-    return data
 
 
 def _verify_skip_fits_update(skip_fits_update, hdulist, asdf_struct, context):

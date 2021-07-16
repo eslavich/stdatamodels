@@ -8,6 +8,10 @@ import asdf
 import helpers
 from stdatamodels import s3_utils
 
+import warnings
+import stdatamodels
+
+warnings.filterwarnings("error", category=stdatamodels.validate.ValidationWarning)
 
 @pytest.fixture(autouse=True)
 def monkey_patch_s3_client(monkeypatch, request):
