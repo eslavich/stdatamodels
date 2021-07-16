@@ -6,6 +6,7 @@ import asdf.schema
 
 from stdatamodels import DataModel
 from stdatamodels import fits_support
+from stdatamodels.validate import ValidationWarning
 
 from models import FitsModel, PureFitsModel
 
@@ -275,10 +276,11 @@ def test_replace_table(tmp_path):
         assert hdulist[1].data.dtype[1].str == '>f4'
         assert hdulist[1].header['TFORM2'] == 'E'
 
-    with DataModel(file_path, schema=schema_wide) as m:
-        # Trigger casting:
-        m.data = m.data
-        m.to_fits(file_path2, overwrite=True)
+    with pytest.warns(ValidationWarning):
+        with DataModel(file_path, schema=schema_wide) as m:
+            # Trigger casting:
+            m.data = m.data
+            m.to_fits(file_path2, overwrite=True)
 
     with fits.open(file_path2, memmap=False) as hdulist:
         assert records_equal(x, np.asarray(hdulist[1].data))
